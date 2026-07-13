@@ -1,0 +1,8 @@
+streamlit
+google-generativeai
+gTTS
+moviepy==1.0.3
+requests
+Pillow
+imageio-ffmpeg
+google-genai
