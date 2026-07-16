@@ -150,7 +150,7 @@ st.markdown(
 @st.cache_resource(show_spinner=False)
 def get_client():
     """بيعمل اتصال واحد بس بالـ Space ويحتفظ بيه (Client بيتعمل مرة واحدة)."""
-    return Client(HF_SPACE_ID, hf_token=HF_TOKEN)
+    return Client(HF_SPACE_ID, token=HF_TOKEN)
 
 
 def _find_video_path(result):
