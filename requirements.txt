@@ -6,3 +6,5 @@ requests
 Pillow
 imageio-ffmpeg
 google-genai
+streamlit
+gradio_client
