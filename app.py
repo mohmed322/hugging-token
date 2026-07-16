@@ -26,7 +26,7 @@ from gradio_client import Client
 # إعدادات عامة
 # ----------------------------------------------------------------------------
 HF_SPACE_ID = "Lightricks/LTX-2-3"  # الـ Space الرسمية لـ LTX-2.3 (Lightricks)
-MIN_DURATION, MAX_DURATION, DEFAULT_DURATION = 1, 10  # ثواني، حسب حدود الـ Space نفسها
+MIN_DURATION, MAX_DURATION = 1, 10  # ثواني، حسب حدود الـ Space نفسها
 DEFAULT_DURATION = 5
 
 def _get_hf_token():
