@@ -6,5 +6,5 @@ requests
 Pillow
 imageio-ffmpeg
 google-genai
-streamlit
-gradio_client
+streamlit>=1.32
+gradio_client>=1.0
