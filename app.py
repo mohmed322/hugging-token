@@ -181,14 +181,19 @@ def _find_video_path(result):
 def generate_video(prompt: str, duration: int, enhance_prompt: bool, high_resolution: bool):
     """بيبعت الطلب لـ Space الـ LTX-2.3 ويرجّع مسار الفيديو الناتج (mp4) محليًا."""
     client = get_client()
+    # الأبعاد الافتراضية للـ Space: 1024x1536 عادي، وبنكبّرها شوية للدقة العالية
+    height, width = (1536, 2048) if high_resolution else (1024, 1536)
     try:
         result = client.predict(
-            None,              # الصورة الاختيارية لتوجيه الحركة — مش مستخدمة هنا
-            prompt,            # وصف الفيديو (Prompt)
-            duration,          # المدة بالثواني
-            enhance_prompt,    # تحسين الوصف تلقائيًا
-            high_resolution,   # دقة عالية (أبطأ في التوليد)
-            api_name="/generate",
+            input_image=None,          # الصورة الاختيارية لتوجيه الحركة — مش مستخدمة هنا
+            prompt=prompt,              # وصف الفيديو (Prompt)
+            duration=float(duration),   # المدة بالثواني (رقم عشري بين 1.0 و 10.0)
+            enhance_prompt=enhance_prompt,  # تحسين الوصف تلقائيًا
+            seed=10,
+            randomize_seed=True,         # نسيب Seed عشوائي كل مرة عشان نتايج متنوعة
+            height=height,
+            width=width,
+            api_name="/generate_video",
         )
     except Exception as first_error:
         # لو الـ endpoint أو ترتيب المدخلات اتغيّر في الـ Space، نطبع توصيف
