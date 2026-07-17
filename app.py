@@ -1,55 +1,59 @@
 """
-مولّد فيديو بالذكاء الاصطناعي — LTX-2.3 (فيديو + صوت معًا)
-==========================================================
+322 — مقصّ أفضل 60 ثانية من فيديو يوتيوب (بدون ذكاء اصطناعي)
+================================================================
 تطبيق Streamlit بتصميم فضائي (خلفية سودا + نجوم متحركة + رائد فضاء وكواكب
-بتظهر بين فترة وفترة) بيتصل بـ Hugging Face Space المجانية الرسمية لموديل
-LTX-2.3 الخاص بـ Lightricks (Lightricks/LTX-2-3) عن طريق gradio_client.
+بتظهر بين فترة وفترة).
 
-ملاحظة مهمة:
-------------
-Hugging Face Spaces أحيانًا بتغيّر اسم الـ endpoint أو ترتيب المدخلات
-الداخلية بتاعتها مع تحديثات الموديل. لو حصل خطأ عند الاتصال، الكود هيطبعلك
-تلقائيًا توصيف الـ API الحالي (عن طريق client.view_api) في رسالة الخطأ عشان
-تظبط الأسماء/الترتيب بسهولة من غير ما تدوّر بنفسك.
+الفكرة:
+-------
+المستخدم بيحط لينك يوتيوب لفيديو طويل، والتطبيق:
+  1) بينزّل الفيديو محليًا (yt-dlp).
+  2) بيحلل "طاقة الصوت" (RMS Loudness) على طول الفيديو كله عن طريق تحليل
+     إشارة صوتية بحتة (Digital Signal Processing) — من غير أي نموذج ذكاء
+     اصطناعي أو تعلم آلي. الفكرة إن اللحظات "الأهم" غالبًا بتكون أعلى صوتًا
+     (كلام، حماس، موسيقى، تصفيق...) مقارنة باللحظات الهادئة.
+  3) بيدوّر على أفضل نافذة مدتها 60 ثانية (بأعلى متوسط طاقة صوت) باستخدام
+     Sliding Window + Prefix Sums (خوارزمية رياضية بسيطة، مفيش أي AI فيها).
+  4) بيقص الفيديو عند اللحظة دي بـ ffmpeg ويطلعه جاهز للتحميل.
+  5) المستخدم كمان يقدر يعدّل نقطة البداية والمدة يدويًا زي أي video editor
+     بسيط، ويقص من غير ما يعتمد على التحليل التلقائي خالص لو حاب.
+
+المتطلبات على السيرفر (مش Python packages بس):
+------------------------------------------------
+- ffmpeg لازم يكون متثبت على السيرفر (متاح في PATH).
+- مكتبة yt-dlp (requirements.txt).
 """
 
 import os
-import random
+import shutil
+import subprocess
+import tempfile
 import traceback
+import wave
+import audioop
 
 import streamlit as st
-from gradio_client import Client
+
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
 
 # ----------------------------------------------------------------------------
 # إعدادات عامة
 # ----------------------------------------------------------------------------
-HF_SPACE_ID = "Lightricks/LTX-2-3"  # الـ Space الرسمية لـ LTX-2.3 (Lightricks)
-MIN_DURATION, MAX_DURATION = 1, 10  # ثواني، حسب حدود الـ Space نفسها
-DEFAULT_DURATION = 5
-
-
-def _get_hf_token():
-    """بيجيب الـ Hugging Face Token من متغيرات البيئة أو من secrets.toml (اختياري)."""
-    token = os.environ.get("HF_TOKEN")
-    if token:
-        return token
-    try:
-        return st.secrets.get("HF_TOKEN")
-    except Exception:
-        return None
-
-
-HF_TOKEN = _get_hf_token()
+CLIP_DURATION = 60          # مدة المقطع النهائي بالثواني
+ANALYSIS_WINDOW = 1.0       # حجم "بلاطة" التحليل الصوتي بالثواني
+MAX_DOWNLOAD_SECONDS = None  # ممكن تحطها رقم (مثلاً 3600) لو عايز تحدد أقصى مدة فيديو مسموح بيها
 
 st.set_page_config(page_title="322", page_icon="🌌", layout="centered")
 
 # ----------------------------------------------------------------------------
-# توليد نمط النجوم (ثابت، بدون JavaScript، عشان يشتغل بثبات جوه Streamlit)
-# بنعمل "بلاطة" واحدة من النجوم بإحداثيات عشوائية ثابتة (بذرة ثابتة)، وبعدين
-# بنكررها مرتين جنب بعض بالظبط، وبنحرك الاتنين مع بعض بمقدار عرض بلاطة واحدة
-# فقط — عشان لما توصل البلاطة الأولى لنص المشهد، الثانية (المطابقة ليها 100%)
-# تكون وصلت لنفس المكان بالظبط، فمفيش أي إحساس بقطع أو إعادة تشغيل المشهد.
+# توليد نمط النجوم (نفس الخلفية الفضائية الأصلية بدون أي تغيير)
 # ----------------------------------------------------------------------------
+import random
+
+
 def _star_shadows(count: int, color: str, seed: int) -> str:
     rng = random.Random(seed)
     points = []
@@ -65,9 +69,6 @@ _STARS_TINY = _star_shadows(420, "rgba(255,255,255,0.55)", seed=1)
 _STARS_SMALL = _star_shadows(220, "rgba(255,255,255,0.85)", seed=2)
 _STARS_BIG = _star_shadows(90, "rgba(201,191,255,0.95)", seed=3)
 
-# ملحوظة: الكود ده لازم يتكتب كله في سطر واحد من غير أي مسافات بادئة أو أسطر
-# فاضية جواه — لو اتقسم على أسطر متساحبة، Streamlit ممكن يفهمه غلط كـ"كود نصي"
-# بدل ما يرسمه كعنصر HTML فعلي (وده اللي كان بيسبب ظهور الكود كنص على الصفحة).
 _STAR_TILE_HTML = (
     f'<div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_DIM}"></div>'
     f'<div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_TINY}"></div>'
@@ -97,7 +98,7 @@ _SPACE_BACKGROUND_HTML = (
 )
 
 # ----------------------------------------------------------------------------
-# CSS — الثيم الفضائي الكامل (خلفية، نجوم متحركة، زجاج شفاف للعناصر)
+# CSS — الثيم الفضائي الكامل (نفس الأصلي)
 # ----------------------------------------------------------------------------
 st.markdown(
     """
@@ -121,7 +122,6 @@ st.markdown(
 
     h1, h2, h3, p, label, span, div { color: #ffffff; }
 
-    /* ---------------- الخلفية الفضائية ---------------- */
     .space-bg {
         position: fixed;
         inset: 0;
@@ -165,7 +165,6 @@ st.markdown(
     @keyframes twinkleB { from { opacity: .4; }  to { opacity: .9; } }
     @keyframes twinkleC { from { opacity: .55; } to { opacity: 1; } }
 
-    /* رائد الفضاء: بيظهر ويعبر الشاشة من اليمين للشمال كل ~17 ثانية */
     .astronaut {
         position: absolute;
         top: 18%;
@@ -174,7 +173,6 @@ st.markdown(
     .astronaut svg { animation: tumble 6s ease-in-out infinite alternate; }
     @keyframes tumble { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
 
-    /* الكواكب: كل واحد بمدة وتأخير مختلف عشان ظهورهم يبان عشوائي */
     .planet { position: absolute; border-radius: 50%; }
     .planet-1 {
         top: 12%; width: 26px; height: 26px; background: #7c5cff;
@@ -195,8 +193,6 @@ st.markdown(
         animation-delay: -6s;
     }
 
-    /* الظهور مش دايم: العنصر بيفضل مخفي/برّه الشاشة أغلب دورة الحركة، وبيعبر
-       الشاشة بس في جزء بسيط منها — فيبان بشكل متقطع كل ~15-20 ثانية */
     @keyframes crossFar {
         0%   { left: 110%; opacity: 0; }
         55%  { left: 110%; opacity: 0; }
@@ -205,7 +201,6 @@ st.markdown(
         100% { left: -15%; opacity: 0; }
     }
 
-    /* ---------------- شعار 322 ---------------- */
     .app-header { text-align: center; margin-bottom: 2rem; }
     .app-logo {
         font-size: 44px;
@@ -239,7 +234,6 @@ st.markdown(
         margin-top: 0.3rem;
     }
 
-    /* ---------------- عناصر زجاجية شفافة (Glassmorphism) ---------------- */
     div[data-testid="stForm"] {
         background: transparent !important;
         border: none !important;
@@ -247,11 +241,8 @@ st.markdown(
         padding: 0 !important;
     }
 
-    div[data-testid="stTextArea"] textarea,
-    div[data-testid="stTextArea"] div[data-baseweb="textarea"],
-    div[data-testid="stTextArea"] div[data-baseweb="textarea"] textarea,
-    div[class*="stTextArea"] textarea,
-    textarea {
+    div[data-testid="stTextInput"] input,
+    div[class*="stTextInput"] input {
         background: rgba(255,255,255,0.04) !important;
         background-color: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
@@ -260,11 +251,9 @@ st.markdown(
         box-shadow: none !important;
         border-radius: 22px !important;
         color: #ffffff !important;
-    }
-    textarea {
         text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     }
-    textarea::placeholder {
+    div[data-testid="stTextInput"] input::placeholder {
         color: rgba(255,255,255,0.55) !important;
     }
 
@@ -315,6 +304,10 @@ st.markdown(
         border: 1px solid rgba(255,255,255,0.1) !important;
         border-radius: 16px !important;
     }
+
+    div[data-testid="stSlider"] {
+        padding: 0.5rem 0.2rem 1rem 0.2rem;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -327,171 +320,282 @@ st.markdown(_SPACE_BACKGROUND_HTML, unsafe_allow_html=True)
 
 st.markdown(
     '<div class="app-header"><div class="app-logo">322</div>'
-    '<p>اكتب وصف الفيديو اللي في خيالك</p></div>',
+    '<p>حط لينك يوتيوب — هنحلل الصوت بس (خفيف وسريع) عشان نقترح أقوى 60 '
+    'ثانية، وهنحمّل المقطع المختار بس من غير ما ننزّل الفيديو كامل</p></div>',
     unsafe_allow_html=True,
 )
 
 
-@st.cache_resource(show_spinner=False)
-def get_client():
-    """بيعمل اتصال واحد بس بالـ Space ويحتفظ بيه (Client بيتعمل مرة واحدة)."""
-    return Client(HF_SPACE_ID, token=HF_TOKEN)
+# ----------------------------------------------------------------------------
+# أدوات مساعدة: معاينة المعلومات، تحليل عينة الصوت فقط، ثم تحميل المقطع
+# المختار بس — كله بدون أي ذكاء اصطناعي، وبدون تحميل الفيديو كامل.
+# ----------------------------------------------------------------------------
+def _ffmpeg_available() -> bool:
+    return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def _find_video_path(result):
-    """بيدور جوه رد الـ API عن أول مسار فيديو حقيقي موجود على القرص
-    (gradio_client بينزّل الملفات محليًا تلقائيًا)."""
-
-    def is_valid_path(x):
-        return isinstance(x, str) and os.path.exists(x)
-
-    if is_valid_path(result):
-        return result
-
-    if isinstance(result, dict):
-        for value in result.values():
-            found = _find_video_path(value)
-            if found:
-                return found
-
-    if isinstance(result, (list, tuple)):
-        for item in result:
-            found = _find_video_path(item)
-            if found:
-                return found
-
-    return None
-
-
-def generate_video(prompt: str, duration: int, enhance_prompt: bool, high_resolution: bool):
-    """بيبعت الطلب لـ Space الـ LTX-2.3 ويرجّع مسار الفيديو الناتج (mp4) محليًا."""
-    client = get_client()
-    # الأبعاد الافتراضية للـ Space: 1024x1536 عادي، وبنكبّرها شوية للدقة العالية
-    height, width = (1536, 2048) if high_resolution else (1024, 1536)
-    try:
-        result = client.predict(
-            input_image=None,              # الصورة الاختيارية لتوجيه الحركة — مش مستخدمة هنا
-            prompt=prompt,                  # وصف الفيديو (Prompt)
-            duration=float(duration),       # المدة بالثواني (رقم عشري بين 1.0 و 10.0)
-            enhance_prompt=enhance_prompt,   # تحسين الوصف تلقائيًا
-            seed=10,
-            randomize_seed=True,             # نسيب Seed عشوائي كل مرة عشان نتايج متنوعة
-            height=height,
-            width=width,
-            api_name="/generate_video",
-        )
-    except Exception as first_error:
-        # لو الـ endpoint أو ترتيب المدخلات اتغيّر في الـ Space، نطبع توصيف
-        # الـ API الحالي عشان تقدر تظبط الأسماء بسهولة من غير ما تدوّر بنفسك.
-        try:
-            api_info = client.view_api(print_info=False, return_format="dict")
-        except Exception:
-            api_info = "تعذّر جلب توصيف الـ API أيضًا — تأكد من اتصال الإنترنت أو من اسم الـ Space."
+def get_video_info(url: str):
+    """بيجيب معلومات الفيديو (المدة أساسًا) من غير ما ينزّل أي حاجة خالص."""
+    if yt_dlp is None:
         raise RuntimeError(
-            "فشل الاتصال بنموذج LTX-2.3.\n\n"
-            f"تفاصيل الخطأ الأصلي: {first_error}\n\n"
-            "توصيف الـ API الحالي للـ Space (استخدمه لتعديل أسماء/ترتيب "
-            f"المدخلات في دالة generate_video):\n{api_info}"
-        ) from first_error
+            "مكتبة yt-dlp مش متثبتة. ضيفها في requirements.txt: yt-dlp"
+        )
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    duration = info.get("duration")
+    if not duration:
+        raise RuntimeError("تعذّر تحديد مدة الفيديو من الرابط ده.")
+    return float(duration), info
 
-    video_path = _find_video_path(result)
-    if not video_path:
-        raise RuntimeError(f"تم الاتصال بنجاح لكن تعذّر إيجاد ملف الفيديو في الرد: {result}")
 
-    return video_path
+def download_audio_sample(url: str, workdir: str) -> str:
+    """
+    بينزّل الصوت بس (من غير الفيديو) عشان نحلل بيه — حجم الصوت أصغر بكتير
+    من الفيديو، فده بيوفر وقت وباندويدث كبير قبل ما نحدد المقطع المطلوب.
+    """
+    if yt_dlp is None:
+        raise RuntimeError(
+            "مكتبة yt-dlp مش متثبتة. ضيفها في requirements.txt: yt-dlp"
+        )
+    out_template = os.path.join(workdir, "audio_sample.%(ext)s")
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        path = ydl.prepare_filename(info)
+        if os.path.exists(path):
+            return path
+    raise RuntimeError("تعذّر تحميل عينة الصوت لتحليلها.")
+
+
+def download_youtube_clip(url: str, start_seconds: float, end_seconds: float, workdir: str) -> str:
+    """
+    بينزّل المقطع المطلوب بس (من `start_seconds` لـ `end_seconds`) مباشرة من
+    يوتيوب من غير ما ينزّل الفيديو كامل، عن طريق خاصية download_ranges في
+    yt-dlp (بتستخدم قدرة سيرفرات يوتيوب على تسليم "نطاق" زمني محدد فقط).
+    """
+    if yt_dlp is None:
+        raise RuntimeError(
+            "مكتبة yt-dlp مش متثبتة. ضيفها في requirements.txt: yt-dlp"
+        )
+    from yt_dlp.utils import download_range_func
+
+    out_template = os.path.join(workdir, "clip.%(ext)s")
+    ydl_opts = {
+        "format": "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/best",
+        "outtmpl": out_template,
+        "merge_output_format": "mp4",
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "download_ranges": download_range_func(None, [(start_seconds, end_seconds)]),
+        "force_keyframes_at_cuts": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        path = ydl.prepare_filename(info)
+        mp4_path = os.path.splitext(path)[0] + ".mp4"
+        if os.path.exists(mp4_path):
+            return mp4_path
+        if os.path.exists(path):
+            return path
+    raise RuntimeError("تعذّر تحميل المقطع من يوتيوب.")
+
+
+def compute_loudness_profile(audio_path: str, workdir: str, window: float = ANALYSIS_WINDOW):
+    """
+    بيحوّل عينة الصوت لـ PCM خام (mono, 16-bit) عن طريق ffmpeg، وبعدين بيحسب
+    متوسط الطاقة (RMS) لكل "بلاطة" زمنية بطول `window` ثانية باستخدام
+    مكتبة audioop القياسية في بايثون — تحليل إشارة رقمي بحت، من غير أي
+    نموذج تعلم آلي أو ذكاء اصطناعي.
+    """
+    wav_path = os.path.join(workdir, "audio.wav")
+    subprocess.run(
+        [
+            "ffmpeg", "-y", "-i", audio_path,
+            "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", wav_path,
+        ],
+        check=True, capture_output=True,
+    )
+
+    with wave.open(wav_path, "rb") as wf:
+        sample_rate = wf.getframerate()
+        sample_width = wf.getsampwidth()
+        frames_per_window = int(sample_rate * window)
+        rms_values = []
+        while True:
+            frames = wf.readframes(frames_per_window)
+            if not frames:
+                break
+            rms = audioop.rms(frames, sample_width)
+            rms_values.append(rms)
+
+    return rms_values, window
+
+
+def find_best_window(rms_values, window: float, clip_duration: float = CLIP_DURATION) -> float:
+    """
+    بيدوّر على أفضل نافذة مدتها `clip_duration` ثانية بأعلى متوسط طاقة صوت،
+    باستخدام Prefix Sums + Sliding Window (خوارزمية رياضية بسيطة، O(n)).
+    بيرجّع ثانية البداية المقترحة.
+    """
+    if not rms_values:
+        return 0.0
+
+    slices_per_clip = max(1, int(round(clip_duration / window)))
+    n = len(rms_values)
+
+    if n <= slices_per_clip:
+        return 0.0
+
+    prefix = [0] * (n + 1)
+    for i, v in enumerate(rms_values):
+        prefix[i + 1] = prefix[i] + v
+
+    best_start_idx = 0
+    best_sum = -1
+    for start in range(0, n - slices_per_clip + 1):
+        window_sum = prefix[start + slices_per_clip] - prefix[start]
+        if window_sum > best_sum:
+            best_sum = window_sum
+            best_start_idx = start
+
+    return best_start_idx * window
 
 
 # ----------------------------------------------------------------------------
-# واجهة الإدخال
+# حالة الجلسة
 # ----------------------------------------------------------------------------
-with st.form("video_form"):
-    prompt = st.text_area(
-        "وصف الفيديو",
-        placeholder="مثال: رائد فضاء يمشي ببطء على سطح القمر، غبار ناعم يتطاير حول قدميه، إضاءة سينمائية...",
-        height=130,
+if "workdir" not in st.session_state:
+    st.session_state.workdir = tempfile.mkdtemp(prefix="clip322_")
+if "video_url" not in st.session_state:
+    st.session_state.video_url = None
+if "video_duration" not in st.session_state:
+    st.session_state.video_duration = None
+if "suggested_start" not in st.session_state:
+    st.session_state.suggested_start = None
+if "clip_path" not in st.session_state:
+    st.session_state.clip_path = None
+
+if not _ffmpeg_available():
+    st.error(
+        "ffmpeg مش متثبت على السيرفر. لازم تضيفه (مثلاً عن طريق packages.txt "
+        "لو التطبيق شغال على Streamlit Community Cloud: اكتب فيه سطر واحد "
+        "بكلمة ffmpeg)."
+    )
+
+# ----------------------------------------------------------------------------
+# خطوة 1: تحليل خفيف — من غير تحميل الفيديو خالص
+# بنجيب مدة الفيديو بس (بدون تحميل)، وبعدين ننزّل الصوت وحده (مش الفيديو)
+# عشان نحلله ونقترح أقوى 60 ثانية.
+# ----------------------------------------------------------------------------
+with st.form("analyze_form"):
+    youtube_url = st.text_input(
+        "لينك فيديو اليوتيوب",
+        placeholder="https://www.youtube.com/watch?v=...",
+        label_visibility="collapsed",
+    )
+    analyze_submitted = st.form_submit_button("🔎 تحليل الفيديو (من غير تحميله كامل)")
+
+if analyze_submitted:
+    if not youtube_url.strip():
+        st.warning("من فضلك، حط لينك يوتيوب الأول.")
+    else:
+        clean_url = youtube_url.strip()
+        try:
+            with st.spinner("جاري جلب معلومات الفيديو..."):
+                duration, _info = get_video_info(clean_url)
+
+            if duration <= CLIP_DURATION:
+                st.warning(
+                    f"مدة الفيديو ({int(duration)} ثانية) أقل من أو تساوي "
+                    f"{CLIP_DURATION} ثانية أصلاً."
+                )
+
+            st.session_state.video_url = clean_url
+            st.session_state.video_duration = duration
+            st.session_state.clip_path = None
+
+            with st.spinner("جاري تحميل الصوت بس (بدون الفيديو) لتحليله..."):
+                audio_path = download_audio_sample(clean_url, st.session_state.workdir)
+
+            with st.spinner("جاري تحليل الصوت لإيجاد أقوى 60 ثانية..."):
+                rms_values, window = compute_loudness_profile(audio_path, st.session_state.workdir)
+                best_start = find_best_window(rms_values, window, CLIP_DURATION)
+                st.session_state.suggested_start = best_start
+
+            # مسح عينة الصوت بعد التحليل، مش محتاجينها تاني
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+
+            st.success("تم التحليل! اضبط نقطة البداية لو حابب، وبعدين حمّل المقطع بس.")
+        except Exception as e:
+            st.error(f"فشل التحليل: {e}")
+            with st.expander("تفاصيل تقنية (للمطوّر)"):
+                st.code(traceback.format_exc())
+
+# ----------------------------------------------------------------------------
+# خطوة 2: اختيار/تعديل نقطة البداية، وبعدين تحميل المقطع المختار بس
+# (الفيديو الأصلي بالكامل من غير ما يتحمل خالص)
+# ----------------------------------------------------------------------------
+if st.session_state.video_url and st.session_state.video_duration:
+    duration = st.session_state.video_duration
+    max_start = max(0.0, duration - 1)
+    default_start = min(st.session_state.suggested_start or 0.0, max_start)
+
+    st.markdown("#### ✂️ اضبط بداية المقطع")
+    start_seconds = st.slider(
+        "ثانية البداية",
+        min_value=0.0,
+        max_value=float(max_start),
+        value=float(default_start),
+        step=1.0,
+        format="%.0f ثانية",
         label_visibility="collapsed",
     )
 
-    col_duration, _ = st.columns([1, 2])
-    with col_duration:
-        duration = st.selectbox(
-            "المدة",
-            options=list(range(MIN_DURATION, MAX_DURATION + 1)),
-            index=DEFAULT_DURATION - MIN_DURATION,
-            format_func=lambda n: f"{n} ثواني",
-        )
+    remaining = duration - start_seconds
+    clip_len = min(CLIP_DURATION, remaining)
+    st.caption(
+        f"⏱️ هيتحمّل من الثانية {int(start_seconds)} لمدة {int(clip_len)} ثانية بس "
+        f"(مدة الفيديو الكلية: {int(duration)} ثانية) — من غير تحميل باقي الفيديو."
+    )
 
-    with st.expander("⚙️ إعدادات متقدمة"):
-        enhance_prompt = st.checkbox("تحسين الوصف تلقائيًا (Enhance Prompt)", value=True)
-        high_resolution = st.checkbox("دقة عالية (أبطأ في التوليد)", value=False)
-
-    submitted = st.form_submit_button("إنشاء الفيديو")
-
-# CSS إضافي بيتحمّل هنا (بعد إنشاء العناصر فوق) عشان يكون آخر حاجة في الصفحة،
-# فيغلب على تنسيق Streamlit/BaseWeb الداخلي اللي بيتحمّل بعد أي CSS نحطه فوق.
-st.markdown(
-    """
-    <style>
-    div[data-testid="stTextArea"] textarea,
-    div[data-testid="stTextArea"] div[data-baseweb="textarea"],
-    div[data-testid="stTextArea"] div[data-baseweb="textarea"] textarea {
-        background: rgba(255,255,255,0.04) !important;
-        background-color: rgba(255,255,255,0.04) !important;
-        backdrop-filter: blur(6px) !important;
-        -webkit-backdrop-filter: blur(6px) !important;
-        border: 1px solid rgba(255,255,255,0.14) !important;
-        box-shadow: none !important;
-        border-radius: 22px !important;
-        color: #ffffff !important;
-        text-shadow: 0 1px 3px rgba(0,0,0,0.6) !important;
-    }
-    div[data-testid="stTextArea"] textarea::placeholder {
-        color: rgba(255,255,255,0.55) !important;
-    }
-    div[data-testid="stSelectbox"] div[data-baseweb="select"],
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {
-        background: rgba(255,255,255,0.04) !important;
-        background-color: rgba(255,255,255,0.04) !important;
-        backdrop-filter: blur(6px) !important;
-        -webkit-backdrop-filter: blur(6px) !important;
-        border-color: rgba(255,255,255,0.14) !important;
-        box-shadow: none !important;
-        border-radius: 14px !important;
-    }
-    div[data-testid="stSelectbox"] * {
-        color: #ffffff !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ----------------------------------------------------------------------------
-# التوليد والعرض
-# ----------------------------------------------------------------------------
-if submitted:
-    if not prompt.strip():
-        st.warning("من فضلك، اكتب وصف الفيديو الأول.")
-    else:
-        with st.spinner("جاري توليد الفيديو والصوت... ممكن تاخد شوية وقت حسب المدة المطلوبة"):
+    if st.button("⬇️ حمّل المقطع بس"):
+        with st.spinner("جاري تحميل المقطع المختار بس من يوتيوب..."):
             try:
-                video_path = generate_video(
-                    prompt=prompt.strip(),
-                    duration=duration,
-                    enhance_prompt=enhance_prompt,
-                    high_resolution=high_resolution,
+                clip_path = download_youtube_clip(
+                    st.session_state.video_url,
+                    start_seconds,
+                    start_seconds + clip_len,
+                    st.session_state.workdir,
                 )
-                st.success("تم إنتاج الفيديو بنجاح!")
-                st.video(video_path)
-                with open(video_path, "rb") as f:
-                    st.download_button(
-                        "⬇️ تحميل الفيديو (mp4)",
-                        data=f.read(),
-                        file_name="ltx_video.mp4",
-                        mime="video/mp4",
-                    )
+                st.session_state.clip_path = clip_path
             except Exception as e:
-                st.error(str(e))
+                st.error(f"فشل تحميل المقطع: {e}")
                 with st.expander("تفاصيل تقنية (للمطوّر)"):
                     st.code(traceback.format_exc())
+
+if st.session_state.clip_path and os.path.exists(st.session_state.clip_path):
+    st.success("تم تحميل المقطع بنجاح!")
+    st.video(st.session_state.clip_path)
+    with open(st.session_state.clip_path, "rb") as f:
+        st.download_button(
+            "⬇️ حفظ المقطع على جهازك (mp4)",
+            data=f.read(),
+            file_name="clip_60s.mp4",
+            mime="video/mp4",
+        )
