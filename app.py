@@ -95,27 +95,27 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
                     
             st.info("🔄 جاري تحميل الفيديو كاملاً على السيرفر السحابي بأقصى سرعة...")
             
-            # الإعدادات السحرية لتخطي حظر الـ 403 بشكل كامل على السيرفرات السحابية:
+            # إعدادات متقدمة جداً لتجاوز جدار حظر يوتيوب 403 الجديد
             ydl_opts = {
                 'format': 'best[ext=mp4]/best', 
                 'outtmpl': temp_full_video,
                 'quiet': True,
                 'no_warnings': True,
-                # إجبار yt-dlp على استخدام متصفح وهمي متكامل يحاكي سلوك العميل البشري
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    'Sec-Fetch-Mode': 'navigate',
-                },
-                # الاستعانة بـ client خارجي لتجنب كشف سيرفرات الاستضافة
+                'nocheckcertificate': True,
+                # إجبار الأداة على استخدام بروتوكول تطبيق الموبايل الرسمي لتجنب الحجب
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web'],
-                        'skip': ['dash', 'hls']
+                        'player_client': ['ios', 'android'],
+                        'player_skip': ['webpage', 'configs'],
                     }
                 },
-                'nocheckcertificate': True,
+                # ترويسات متصفح عشوائية ومتكاملة ومحدثة
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Fetch-Mode': 'navigate',
+                }
             }
             
             try:
@@ -153,9 +153,9 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
                                 mime="video/mp4"
                             )
                     else:
-                        st.error("❌ فشل معالجة وقص الفيديو.")
+                        st.error("❌ فشل معالجة وقص الفيديو محلياً.")
                 else:
-                    st.error("❌ فشل تحميل الفيديو الأصلي بسبب قيود الحماية من يوتيوب.")
+                    st.error("❌ فشل تحميل الفيديو الأصلي بسبب قيود الحماية الصارمة من يوتيوب.")
                     
             except Exception as e:
                 st.error(f"🚨 حدث خطأ أثناء المعالجة: {str(e)}")
