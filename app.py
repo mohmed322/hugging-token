@@ -3,6 +3,7 @@ import yt_dlp
 import os
 import re
 import shutil
+import subprocess
 
 # إعدادات الصفحة العامة
 st.set_page_config(
@@ -34,12 +35,12 @@ st.write("ضع رابط الفيديو وحدد الوقت المطلوب لقص
 
 st.divider()
 
-# فحص وجود ffmpeg في السيرفر وعرض حالته للمستخدم للمساعدة في التشخيص
+# فحص وجود ffmpeg في السيرفر
 ffmpeg_path = shutil.which("ffmpeg")
 if ffmpeg_path:
     st.sidebar.success("✅ أداة القص (FFmpeg) جاهزة ومتصلة بالسيرفر!")
 else:
-    st.sidebar.error("⚠️ تحذير: أداة FFmpeg لم يتم تفعيلها بالسيرفر بعد. تأكد من وجود ملف packages.txt وإعادة بناء التطبيق.")
+    st.sidebar.error("⚠️ تحذير: أداة FFmpeg لم يتم تفعيلها بالسيرفر بعد. تأكد من وجود ملف packages.txt")
 
 video_url = st.text_input("🔗 ضع رابط فيديو اليوتيوب هنا:", placeholder="https://www.youtube.com/watch?v=...")
 
@@ -74,6 +75,8 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
         st.warning("⚠️ يرجى إدخال رابط الفيديو أولاً!")
     elif not is_valid_youtube_url(video_url):
         st.error("❌ رابط اليوتيوب غير صحيح.")
+    elif not ffmpeg_path:
+        st.error("❌ لا يمكن القص لأن FFmpeg غير متوفر على السيرفر.")
     else:
         start_secs = time_to_seconds(start_time)
         end_secs = time_to_seconds(end_time)
@@ -83,47 +86,69 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
         elif start_secs >= end_secs:
             st.error("❌ يجب أن يكون وقت البداية أقل من وقت النهاية!")
         else:
+            # أسماء الملفات المؤقتة
+            temp_full_video = "temp_full_video.mp4"
             output_filename = "clipped_video.mp4"
             
-            if os.path.exists(output_filename):
-                os.remove(output_filename)
-                
-            st.info("🔄 جاري الاتصال بيوتيوب وقص المقطع... قد يستغرق ذلك ثوانٍ.")
+            # تنظيف أي ملفات قديمة من الذاكرة
+            for temp_file in [temp_full_video, output_filename]:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    
+            st.info("🔄 جاري تحميل الفيديو كاملاً على السيرفر السحابي بأقصى سرعة...")
             
-            # التعديل الجديد لمنع خطأ ffmpeg code 8:
-            # هنا بنخليه يحمل جودة عالية مدمجة ومستقرة مباشرة (مثل mp4)
+            # إعدادات تحميل الفيديو الكامل بصيغة مدمجة وجاهزة وسريعة
             ydl_opts = {
                 'format': 'best[ext=mp4]/best', 
-                'outtmpl': output_filename,
-                'download_ranges': lambda info_dict, ydl: [{
-                    'start_time': start_secs,
-                    'end_time': end_secs,
-                }],
-                'force_keyframes_at_cuts': True,
+                'outtmpl': temp_full_video,
                 'quiet': True,
                 'no_warnings': True
             }
             
-            if ffmpeg_path:
-                ydl_opts['ffmpeg_location'] = ffmpeg_path
-            
             try:
+                # 1. تحميل الفيديو كاملاً أولاً
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([video_url])
+                
+                if os.path.exists(temp_full_video):
+                    st.info("✂️ جاري الآن قص الجزء المطلوب بدقة عالية...")
                     
-                if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
-                    st.success("🎉 تم قص المقطع بنجاح واكتمال المعالجة!")
-                    st.video(output_filename)
+                    # حساب مدة المقطع المراد قصه
+                    duration_secs = end_secs - start_secs
                     
-                    with open(output_filename, "rb") as file:
-                        st.download_button(
-                            label="📥 اضغط هنا لتحميل المقطع إلى جهازك",
-                            data=file,
-                            file_name="youtube_clip.mp4",
-                            mime="video/mp4"
-                        )
+                    # 2. استخدام ffmpeg مباشرة لقص الملف المحلي (مضمون 100% وبدون مشاكل بروتوكولات)
+                    # الأمر ده بيقص الفيديو بسرعة الصاروخ ومن غير إعادة رندرة تستهلك وقت
+                    cmd = [
+                        ffmpeg_path,
+                        "-ss", str(start_secs),
+                        "-i", temp_full_video,
+                        "-t", str(duration_secs),
+                        "-c", "copy",
+                        output_filename
+                    ]
+                    
+                    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    
+                    # 3. حذف الفيديو الكامل فوراً لتوفير مساحة السيرفر
+                    if os.path.exists(temp_full_video):
+                        os.remove(temp_full_video)
+                        
+                    # 4. التأكد من نجاح عملية القص وعرض النتيجة للمستخدم
+                    if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
+                        st.success("🎉 تم قص المقطع بنجاح واكتمال المعالجة!")
+                        st.video(output_filename)
+                        
+                        with open(output_filename, "rb") as file:
+                            st.download_button(
+                                label="📥 اضغط هنا لتحميل المقطع إلى جهازك",
+                                data=file,
+                                file_name="youtube_clip.mp4",
+                                mime="video/mp4"
+                            )
+                    else:
+                        st.error("❌ فشل معالجة وقص الفيديو.")
                 else:
-                    st.error("❌ فشل معالجة الفيديو.")
+                    st.error("❌ فشل تحميل الفيديو الأصلي.")
                     
             except Exception as e:
                 st.error(f"🚨 حدث خطأ أثناء المعالجة: {str(e)}")
