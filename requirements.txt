@@ -8,3 +8,5 @@ imageio-ffmpeg
 google-genai
 streamlit>=1.32
 gradio_client>=1.0
+streamlit
+yt-dlp
