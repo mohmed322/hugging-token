@@ -247,14 +247,17 @@ st.markdown(
         padding: 0 !important;
     }
 
-    div[data-testid="stTextArea"],
-    div[data-baseweb="textarea"],
-    div[data-baseweb="base-input"],
+    div[data-testid="stTextArea"] textarea,
+    div[data-testid="stTextArea"] div[data-baseweb="textarea"],
+    div[data-testid="stTextArea"] div[data-baseweb="textarea"] textarea,
+    div[class*="stTextArea"] textarea,
     textarea {
         background: rgba(255,255,255,0.04) !important;
+        background-color: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
         border: 1px solid rgba(255,255,255,0.14) !important;
+        box-shadow: none !important;
         border-radius: 22px !important;
         color: #ffffff !important;
     }
@@ -265,14 +268,17 @@ st.markdown(
         color: rgba(255,255,255,0.55) !important;
     }
 
-    div[data-testid="stSelectbox"] > div,
-    div[data-baseweb="select"],
-    div[data-baseweb="select"] > div,
-    div[data-baseweb="select"] div {
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"],
+    div[class*="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-baseweb="select"] > div {
         background: rgba(255,255,255,0.04) !important;
+        background-color: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
         border-color: rgba(255,255,255,0.14) !important;
+        box-shadow: none !important;
         border-radius: 14px !important;
     }
     div[data-testid="stSelectbox"] *,
