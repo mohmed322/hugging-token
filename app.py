@@ -427,6 +427,46 @@ with st.form("video_form"):
 
     submitted = st.form_submit_button("إنشاء الفيديو")
 
+# CSS إضافي بيتحمّل هنا (بعد إنشاء العناصر فوق) عشان يكون آخر حاجة في الصفحة،
+# فيغلب على تنسيق Streamlit/BaseWeb الداخلي اللي بيتحمّل بعد أي CSS نحطه فوق.
+st.markdown(
+    """
+    <style>
+    div[data-testid="stTextArea"] textarea,
+    div[data-testid="stTextArea"] div[data-baseweb="textarea"],
+    div[data-testid="stTextArea"] div[data-baseweb="textarea"] textarea {
+        background: rgba(255,255,255,0.04) !important;
+        background-color: rgba(255,255,255,0.04) !important;
+        backdrop-filter: blur(6px) !important;
+        -webkit-backdrop-filter: blur(6px) !important;
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        box-shadow: none !important;
+        border-radius: 22px !important;
+        color: #ffffff !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6) !important;
+    }
+    div[data-testid="stTextArea"] textarea::placeholder {
+        color: rgba(255,255,255,0.55) !important;
+    }
+    div[data-testid="stSelectbox"] div[data-baseweb="select"],
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] div[role="combobox"] {
+        background: rgba(255,255,255,0.04) !important;
+        background-color: rgba(255,255,255,0.04) !important;
+        backdrop-filter: blur(6px) !important;
+        -webkit-backdrop-filter: blur(6px) !important;
+        border-color: rgba(255,255,255,0.14) !important;
+        box-shadow: none !important;
+        border-radius: 14px !important;
+    }
+    div[data-testid="stSelectbox"] * {
+        color: #ffffff !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ----------------------------------------------------------------------------
 # التوليد والعرض
 # ----------------------------------------------------------------------------
