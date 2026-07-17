@@ -30,7 +30,7 @@ import subprocess
 import tempfile
 import traceback
 import wave
-import audioop
+import array
 
 import streamlit as st
 
@@ -417,14 +417,15 @@ def compute_loudness_profile(audio_path: str, workdir: str, window: float = ANAL
     """
     بيحوّل عينة الصوت لـ PCM خام (mono, 16-bit) عن طريق ffmpeg، وبعدين بيحسب
     متوسط الطاقة (RMS) لكل "بلاطة" زمنية بطول `window` ثانية باستخدام
-    مكتبة audioop القياسية في بايثون — تحليل إشارة رقمي بحت، من غير أي
-    نموذج تعلم آلي أو ذكاء اصطناعي.
+    مكتبة array القياسية في بايثون (حساب متوسط تربيعي يدوي) — تحليل إشارة
+    رقمي بحت، من غير أي نموذج تعلم آلي أو ذكاء اصطناعي.
     """
     wav_path = os.path.join(workdir, "audio.wav")
     subprocess.run(
         [
             "ffmpeg", "-y", "-i", audio_path,
-            "-vn", "-ac", "1", "-ar", "16000", "-f", "wav", wav_path,
+            "-vn", "-ac", "1", "-ar", "16000", "-sample_fmt", "s16",
+            "-f", "wav", wav_path,
         ],
         check=True, capture_output=True,
     )
@@ -433,12 +434,22 @@ def compute_loudness_profile(audio_path: str, workdir: str, window: float = ANAL
         sample_rate = wf.getframerate()
         sample_width = wf.getsampwidth()
         frames_per_window = int(sample_rate * window)
+        typecode = {1: "b", 2: "h", 4: "i"}.get(sample_width, "h")
         rms_values = []
         while True:
             frames = wf.readframes(frames_per_window)
             if not frames:
                 break
-            rms = audioop.rms(frames, sample_width)
+            samples = array.array(typecode)
+            # لو عدد البايتات مش مضاعف حجم العينة (آخر بلوك ناقص)، نتجاهل الباقي
+            usable_len = len(frames) - (len(frames) % samples.itemsize)
+            if usable_len <= 0:
+                continue
+            samples.frombytes(frames[:usable_len])
+            if len(samples) == 0:
+                continue
+            sum_sq = sum(s * s for s in samples)
+            rms = (sum_sq / len(samples)) ** 0.5
             rms_values.append(rms)
 
     return rms_values, window
