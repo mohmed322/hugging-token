@@ -90,8 +90,10 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
                 
             st.info("🔄 جاري الاتصال بيوتيوب وقص المقطع... قد يستغرق ذلك ثوانٍ.")
             
+            # التعديل الجديد لمنع خطأ ffmpeg code 8:
+            # هنا بنخليه يحمل جودة عالية مدمجة ومستقرة مباشرة (مثل mp4)
             ydl_opts = {
-                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                'format': 'best[ext=mp4]/best', 
                 'outtmpl': output_filename,
                 'download_ranges': lambda info_dict, ydl: [{
                     'start_time': start_secs,
@@ -102,7 +104,6 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
                 'no_warnings': True
             }
             
-            # إذا عثرنا على ffmpeg نمرر مساره للأداة للتأكيد
             if ffmpeg_path:
                 ydl_opts['ffmpeg_location'] = ffmpeg_path
             
