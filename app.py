@@ -65,35 +65,36 @@ _STARS_TINY = _star_shadows(420, "rgba(255,255,255,0.55)", seed=1)
 _STARS_SMALL = _star_shadows(220, "rgba(255,255,255,0.85)", seed=2)
 _STARS_BIG = _star_shadows(90, "rgba(201,191,255,0.95)", seed=3)
 
-_STAR_TILE_HTML = f"""
-    <div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_DIM}"></div>
-    <div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_TINY}"></div>
-    <div class="star-layer tw-b" style="width:2px;height:2px;box-shadow:{_STARS_SMALL}"></div>
-    <div class="star-layer tw-c" style="width:3px;height:3px;box-shadow:{_STARS_BIG}"></div>
-"""
+# ملحوظة: الكود ده لازم يتكتب كله في سطر واحد من غير أي مسافات بادئة أو أسطر
+# فاضية جواه — لو اتقسم على أسطر متساحبة، Streamlit ممكن يفهمه غلط كـ"كود نصي"
+# بدل ما يرسمه كعنصر HTML فعلي (وده اللي كان بيسبب ظهور الكود كنص على الصفحة).
+_STAR_TILE_HTML = (
+    f'<div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_DIM}"></div>'
+    f'<div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_TINY}"></div>'
+    f'<div class="star-layer tw-b" style="width:2px;height:2px;box-shadow:{_STARS_SMALL}"></div>'
+    f'<div class="star-layer tw-c" style="width:3px;height:3px;box-shadow:{_STARS_BIG}"></div>'
+)
 
-_SPACE_BACKGROUND_HTML = f"""
-<div class="space-bg">
-    <div class="star-track">
-        <div class="star-tile">{_STAR_TILE_HTML}</div>
-        <div class="star-tile">{_STAR_TILE_HTML}</div>
-    </div>
-
-    <div class="astronaut">
-        <svg width="34" height="34" viewBox="0 0 34 34">
-            <ellipse cx="17" cy="20" rx="8" ry="10" fill="#e5e7eb"/>
-            <circle cx="17" cy="10" r="8" fill="#f5f5f7"/>
-            <circle cx="17" cy="10" r="5.5" fill="#7c5cff" opacity="0.55"/>
-            <rect x="4" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
-            <rect x="24" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
-        </svg>
-    </div>
-
-    <div class="planet planet-1"></div>
-    <div class="planet planet-2"></div>
-    <div class="planet planet-3"></div>
-</div>
-"""
+_SPACE_BACKGROUND_HTML = (
+    '<div class="space-bg">'
+    '<div class="star-track">'
+    f'<div class="star-tile">{_STAR_TILE_HTML}</div>'
+    f'<div class="star-tile">{_STAR_TILE_HTML}</div>'
+    '</div>'
+    '<div class="astronaut">'
+    '<svg width="34" height="34" viewBox="0 0 34 34">'
+    '<ellipse cx="17" cy="20" rx="8" ry="10" fill="#e5e7eb"/>'
+    '<circle cx="17" cy="10" r="8" fill="#f5f5f7"/>'
+    '<circle cx="17" cy="10" r="5.5" fill="#7c5cff" opacity="0.55"/>'
+    '<rect x="4" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>'
+    '<rect x="24" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>'
+    '</svg>'
+    '</div>'
+    '<div class="planet planet-1"></div>'
+    '<div class="planet planet-2"></div>'
+    '<div class="planet planet-3"></div>'
+    '</div>'
+)
 
 # ----------------------------------------------------------------------------
 # CSS — الثيم الفضائي الكامل (خلفية، نجوم متحركة، زجاج شفاف للعناصر)
@@ -246,27 +247,38 @@ st.markdown(
         padding: 0 !important;
     }
 
-    div[data-testid="stTextArea"] textarea {
+    div[data-testid="stTextArea"],
+    div[data-baseweb="textarea"],
+    div[data-baseweb="base-input"],
+    textarea {
         background: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
         border: 1px solid rgba(255,255,255,0.14) !important;
         border-radius: 22px !important;
         color: #ffffff !important;
+    }
+    textarea {
         text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     }
-    div[data-testid="stTextArea"] textarea::placeholder {
+    textarea::placeholder {
         color: rgba(255,255,255,0.55) !important;
     }
 
-    div[data-baseweb="select"] > div {
+    div[data-testid="stSelectbox"] > div,
+    div[data-baseweb="select"],
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="select"] div {
         background: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
-        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-color: rgba(255,255,255,0.14) !important;
         border-radius: 14px !important;
     }
-    div[data-baseweb="select"] * { color: #ffffff !important; }
+    div[data-testid="stSelectbox"] *,
+    div[data-baseweb="select"] * {
+        color: #ffffff !important;
+    }
 
     .stButton button,
     div[data-testid="stForm"] button {
@@ -308,12 +320,8 @@ st.markdown(
 st.markdown(_SPACE_BACKGROUND_HTML, unsafe_allow_html=True)
 
 st.markdown(
-    """
-    <div class="app-header">
-        <div class="app-logo">322</div>
-        <p>اكتب وصف الفيديو اللي في خيالك</p>
-    </div>
-    """,
+    '<div class="app-header"><div class="app-logo">322</div>'
+    '<p>اكتب وصف الفيديو اللي في خيالك</p></div>',
     unsafe_allow_html=True,
 )
 
