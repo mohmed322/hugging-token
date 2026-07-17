@@ -86,38 +86,39 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
         elif start_secs >= end_secs:
             st.error("❌ يجب أن يكون وقت البداية أقل من وقت النهاية!")
         else:
-            # أسماء الملفات المؤقتة
             temp_full_video = "temp_full_video.mp4"
             output_filename = "clipped_video.mp4"
             
-            # تنظيف أي ملفات قديمة من الذاكرة
             for temp_file in [temp_full_video, output_filename]:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
                     
             st.info("🔄 جاري تحميل الفيديو كاملاً على السيرفر السحابي بأقصى سرعة...")
             
-            # إعدادات تحميل الفيديو الكامل بصيغة مدمجة وجاهزة وسريعة
+            # تعديل الإعدادات لتجاوز حظر يوتيوب (403 Forbidden)
             ydl_opts = {
                 'format': 'best[ext=mp4]/best', 
                 'outtmpl': temp_full_video,
                 'quiet': True,
-                'no_warnings': True
+                'no_warnings': True,
+                # الأوامر السحرية لتفادي الحجب:
+                'headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                },
+                'nocheckcertificate': True,
             }
             
             try:
-                # 1. تحميل الفيديو كاملاً أولاً
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([video_url])
                 
                 if os.path.exists(temp_full_video):
                     st.info("✂️ جاري الآن قص الجزء المطلوب بدقة عالية...")
                     
-                    # حساب مدة المقطع المراد قصه
                     duration_secs = end_secs - start_secs
                     
-                    # 2. استخدام ffmpeg مباشرة لقص الملف المحلي (مضمون 100% وبدون مشاكل بروتوكولات)
-                    # الأمر ده بيقص الفيديو بسرعة الصاروخ ومن غير إعادة رندرة تستهلك وقت
                     cmd = [
                         ffmpeg_path,
                         "-ss", str(start_secs),
@@ -129,11 +130,9 @@ if st.button("🚀 معالجة وقص المقطع الآن"):
                     
                     subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                     
-                    # 3. حذف الفيديو الكامل فوراً لتوفير مساحة السيرفر
                     if os.path.exists(temp_full_video):
                         os.remove(temp_full_video)
                         
-                    # 4. التأكد من نجاح عملية القص وعرض النتيجة للمستخدم
                     if os.path.exists(output_filename) and os.path.getsize(output_filename) > 0:
                         st.success("🎉 تم قص المقطع بنجاح واكتمال المعالجة!")
                         st.video(output_filename)
