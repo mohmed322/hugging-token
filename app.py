@@ -334,14 +334,15 @@ def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
-def _base_ydl_opts() -> dict:
+def _base_ydl_opts(cookies_path: str = None) -> dict:
     """
-    إعدادات مشتركة بتقلل احتمال ظهور خطأ HTTP 403 Forbidden من يوتيوب —
-    المشكلة دي بتحصل غالبًا لأن يوتيوب بيرفض بعض الطلبات اللي جايه من
-    نوع "عميل الويب" الافتراضي، فبنخلي yt-dlp يجرب يتصرف كأنه تطبيق
-    الموبايل (Android) الأول، وبعدين ios، وبعدين الويب العادي كحل احتياطي.
+    إعدادات مشتركة بتقلل احتمال ظهور خطأ HTTP 403 Forbidden من يوتيوب.
+    يوتيوب في الفترة الأخيرة بيشدّد إجراءات مكافحة البوتات، خصوصًا على
+    IPs بتاعة سيرفرات الاستضافة السحابية (زي Streamlit Cloud)، فبنجرب
+    كذا "عميل" مختلف (Android / iOS / mweb / web) وبنستخدم ملف الـ
+    cookies لو المستخدم رفعه — ده أكتر حل موثوق حاليًا.
     """
-    return {
+    opts = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -349,7 +350,7 @@ def _base_ydl_opts() -> dict:
         "fragment_retries": 5,
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "ios", "web"],
+                "player_client": ["android", "ios", "mweb", "web"],
             }
         },
         "http_headers": {
@@ -359,16 +360,19 @@ def _base_ydl_opts() -> dict:
             )
         },
     }
+    if cookies_path and os.path.exists(cookies_path):
+        opts["cookiefile"] = cookies_path
+    return opts
 
 
-def get_video_info(url: str):
+def get_video_info(url: str, cookies_path: str = None):
     """بيجيب معلومات الفيديو (المدة أساسًا) من غير ما ينزّل أي حاجة خالص."""
     if yt_dlp is None:
         raise RuntimeError(
             "مكتبة yt-dlp مش متثبتة. ضيفها في requirements.txt: yt-dlp"
         )
     ydl_opts = {
-        **_base_ydl_opts(),
+        **_base_ydl_opts(cookies_path),
         "skip_download": True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -379,7 +383,7 @@ def get_video_info(url: str):
     return float(duration), info
 
 
-def download_audio_sample(url: str, workdir: str) -> str:
+def download_audio_sample(url: str, workdir: str, cookies_path: str = None) -> str:
     """
     بينزّل الصوت بس (من غير الفيديو) عشان نحلل بيه — حجم الصوت أصغر بكتير
     من الفيديو، فده بيوفر وقت وباندويدث كبير قبل ما نحدد المقطع المطلوب.
@@ -390,7 +394,7 @@ def download_audio_sample(url: str, workdir: str) -> str:
         )
     out_template = os.path.join(workdir, "audio_sample.%(ext)s")
     ydl_opts = {
-        **_base_ydl_opts(),
+        **_base_ydl_opts(cookies_path),
         "format": "bestaudio/best",
         "outtmpl": out_template,
     }
@@ -402,7 +406,9 @@ def download_audio_sample(url: str, workdir: str) -> str:
     raise RuntimeError("تعذّر تحميل عينة الصوت لتحليلها.")
 
 
-def download_youtube_clip(url: str, start_seconds: float, end_seconds: float, workdir: str) -> str:
+def download_youtube_clip(
+    url: str, start_seconds: float, end_seconds: float, workdir: str, cookies_path: str = None
+) -> str:
     """
     بينزّل المقطع المطلوب بس (من `start_seconds` لـ `end_seconds`) مباشرة من
     يوتيوب من غير ما ينزّل الفيديو كامل، عن طريق خاصية download_ranges في
@@ -416,7 +422,7 @@ def download_youtube_clip(url: str, start_seconds: float, end_seconds: float, wo
 
     out_template = os.path.join(workdir, "clip.%(ext)s")
     ydl_opts = {
-        **_base_ydl_opts(),
+        **_base_ydl_opts(cookies_path),
         "format": "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/best",
         "outtmpl": out_template,
         "merge_output_format": "mp4",
@@ -519,6 +525,8 @@ if "suggested_start" not in st.session_state:
     st.session_state.suggested_start = None
 if "clip_path" not in st.session_state:
     st.session_state.clip_path = None
+if "cookies_path" not in st.session_state:
+    st.session_state.cookies_path = None
 
 if not _ffmpeg_available():
     st.error(
@@ -526,6 +534,26 @@ if not _ffmpeg_available():
         "لو التطبيق شغال على Streamlit Community Cloud: اكتب فيه سطر واحد "
         "بكلمة ffmpeg)."
     )
+
+# ----------------------------------------------------------------------------
+# (اختياري) رفع ملف cookies.txt — يوتيوب في الفترة الأخيرة بيرفض كتير من
+# طلبات التحميل من سيرفرات الاستضافة (Error 403)، وأكتر حل موثوق حاليًا إنك
+# تدّي yt-dlp كوكيز من حساب يوتيوب حقيقي عشان يقتنع إن الطلب من متصفح فعلي.
+# ----------------------------------------------------------------------------
+with st.expander("🍪 (اختياري) رفع ملف cookies.txt — يحل مشاكل تحميل كتيرة"):
+    st.caption(
+        "لو بيظهرلك خطأ 403 Forbidden، صدّر ملف الكوكيز من متصفحك وانت داخل "
+        "على حساب يوتيوب (فيه إضافات زي 'Get cookies.txt LOCALLY' لكروم أو "
+        "'cookies.txt' لفايرفوكس) وارفعه هنا. الملف بيتخزن مؤقتًا على "
+        "السيرفر بس وبيتمسح لما التطبيق يعيد التشغيل."
+    )
+    cookies_file = st.file_uploader("ملف cookies.txt", type=["txt"], label_visibility="collapsed")
+    if cookies_file is not None:
+        cookies_save_path = os.path.join(st.session_state.workdir, "cookies.txt")
+        with open(cookies_save_path, "wb") as f:
+            f.write(cookies_file.getvalue())
+        st.session_state.cookies_path = cookies_save_path
+        st.success("تم حفظ ملف الكوكيز وهيتستخدم في التحميل.")
 
 # ----------------------------------------------------------------------------
 # خطوة 1: تحليل خفيف — من غير تحميل الفيديو خالص
@@ -545,9 +573,10 @@ if analyze_submitted:
         st.warning("من فضلك، حط لينك يوتيوب الأول.")
     else:
         clean_url = youtube_url.strip()
+        cookies_path = st.session_state.cookies_path
         try:
             with st.spinner("جاري جلب معلومات الفيديو..."):
-                duration, _info = get_video_info(clean_url)
+                duration, _info = get_video_info(clean_url, cookies_path)
 
             if duration <= CLIP_DURATION:
                 st.warning(
@@ -560,7 +589,7 @@ if analyze_submitted:
             st.session_state.clip_path = None
 
             with st.spinner("جاري تحميل الصوت بس (بدون الفيديو) لتحليله..."):
-                audio_path = download_audio_sample(clean_url, st.session_state.workdir)
+                audio_path = download_audio_sample(clean_url, st.session_state.workdir, cookies_path)
 
             with st.spinner("جاري تحليل الصوت لإيجاد أقوى 60 ثانية..."):
                 rms_values, window = compute_loudness_profile(audio_path, st.session_state.workdir)
@@ -576,6 +605,11 @@ if analyze_submitted:
             st.success("تم التحليل! اضبط نقطة البداية لو حابب، وبعدين حمّل المقطع بس.")
         except Exception as e:
             st.error(f"فشل التحليل: {e}")
+            if "403" in str(e) or "Forbidden" in str(e):
+                st.info(
+                    "غالبًا الحل: افتح قسم '🍪 رفع ملف cookies.txt' فوق وارفع "
+                    "كوكيز من حساب يوتيوب حقيقي، وجرب تاني."
+                )
             with st.expander("تفاصيل تقنية (للمطوّر)"):
                 st.code(traceback.format_exc())
 
@@ -614,10 +648,16 @@ if st.session_state.video_url and st.session_state.video_duration:
                     start_seconds,
                     start_seconds + clip_len,
                     st.session_state.workdir,
+                    st.session_state.cookies_path,
                 )
                 st.session_state.clip_path = clip_path
             except Exception as e:
                 st.error(f"فشل تحميل المقطع: {e}")
+                if "403" in str(e) or "Forbidden" in str(e):
+                    st.info(
+                        "غالبًا الحل: افتح قسم '🍪 رفع ملف cookies.txt' فوق وارفع "
+                        "كوكيز من حساب يوتيوب حقيقي، وجرب تاني."
+                    )
                 with st.expander("تفاصيل تقنية (للمطوّر)"):
                     st.code(traceback.format_exc())
 
