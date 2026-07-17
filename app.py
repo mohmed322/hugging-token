@@ -1,28 +1,16 @@
 """
 مولّد فيديو بالذكاء الاصطناعي — LTX-2.3 (فيديو + صوت معًا)
 ==========================================================
-تطبيق Streamlit بيتصل بـ Hugging Face Space المجانية الرسمية لموديل LTX-2.3
-الخاص بـ Lightricks (Lightricks/LTX-2-3) عن طريق gradio_client، عشان يولّد
-فيديو قصير (بالصوت) من وصف نصي، من غير ما تحتاج كرت شاشة مدفوع — التوليد
-بيحصل على السيرفرات المجانية بتاعة الـ Space نفسها (ZeroGPU).
+تطبيق Streamlit بتصميم فضائي (خلفية سودا + نجوم متحركة + رائد فضاء وكواكب
+بتظهر بين فترة وفترة) بيتصل بـ Hugging Face Space المجانية الرسمية لموديل
+LTX-2.3 الخاص بـ Lightricks (Lightricks/LTX-2-3) عن طريق gradio_client.
 
 ملاحظة مهمة:
 ------------
-Hugging Face Spaces أحيانًا بتغيّر اسم الـ endpoint أو ترتيب المدخلات الداخلية
-بتاعتها مع تحديثات الموديل. الكود هنا مكتوب على أساس شكل الواجهة الحالي للـ
-Space (صورة اختيارية + Prompt + مدة بالثواني من 1 لـ 10 + تحسين الوصف + دقة
-عالية). لو حصل خطأ عند الاتصال، الكود هيطبعلك تلقائيًا توصيف الـ API الحالي
-(عن طريق client.view_api) في رسالة الخطأ عشان تظبط الأسماء/الترتيب بسهولة
-من غير ما تدور بنفسك.
-
-ملاحظة على التصميم:
--------------------
-منطق الاتصال بالموديل وتوليد الفيديو (generate_video / get_client /
-_find_video_path) زي ما هو بالظبط من غير أي تعديل. اللي اتغيّر بس:
-- الشكل (الخلفية الفضائية + عناصر شفافة بدل الصناديق).
-- خيارَي "تحسين الوصف" و"الدقة العالية" بقوا قيمة ثابتة (True / False) بدل ما
-  يكونوا صناديق ظاهرة في الواجهة، بناءً على طلبك بإخفاء أي صناديق/أزرار زيادة.
-  لو حابب ترجّعهم ظاهرين تاني قولّي.
+Hugging Face Spaces أحيانًا بتغيّر اسم الـ endpoint أو ترتيب المدخلات
+الداخلية بتاعتها مع تحديثات الموديل. لو حصل خطأ عند الاتصال، الكود هيطبعلك
+تلقائيًا توصيف الـ API الحالي (عن طريق client.view_api) في رسالة الخطأ عشان
+تظبط الأسماء/الترتيب بسهولة من غير ما تدوّر بنفسك.
 """
 
 import os
@@ -39,10 +27,6 @@ HF_SPACE_ID = "Lightricks/LTX-2-3"  # الـ Space الرسمية لـ LTX-2.3 (
 MIN_DURATION, MAX_DURATION = 1, 10  # ثواني، حسب حدود الـ Space نفسها
 DEFAULT_DURATION = 5
 
-# قيم ثابتة بدل الصناديق اللي اتشالت من الواجهة (منطق التوليد نفسه لسه زي ما هو)
-ENHANCE_PROMPT_DEFAULT = True
-HIGH_RESOLUTION_DEFAULT = False
-
 
 def _get_hf_token():
     """بيجيب الـ Hugging Face Token من متغيرات البيئة أو من secrets.toml (اختياري)."""
@@ -57,325 +41,277 @@ def _get_hf_token():
 
 HF_TOKEN = _get_hf_token()
 
-st.set_page_config(page_title="مولّد فيديو LTX-2.3", page_icon="🎬", layout="centered")
+st.set_page_config(page_title="322", page_icon="🌌", layout="centered")
 
 # ----------------------------------------------------------------------------
-# توليد مواقع النجوم والعناصر العائمة عشوائيًا مرة واحدة بس (وحفظها في
-# الجلسة) عشان الخلفية متبقاش بتتغيّر شكلها كل مرة الصفحة بتعمل rerun
+# توليد نمط النجوم (ثابت، بدون JavaScript، عشان يشتغل بثبات جوه Streamlit)
+# بنعمل "بلاطة" واحدة من النجوم بإحداثيات عشوائية ثابتة (بذرة ثابتة)، وبعدين
+# بنكررها مرتين جنب بعض بالظبط، وبنحرك الاتنين مع بعض بمقدار عرض بلاطة واحدة
+# فقط — عشان لما توصل البلاطة الأولى لنص المشهد، الثانية (المطابقة ليها 100%)
+# تكون وصلت لنفس المكان بالظبط، فمفيش أي إحساس بقطع أو إعادة تشغيل المشهد.
 # ----------------------------------------------------------------------------
-def _make_star_shadows(count, opacity_min, opacity_max):
-    random.seed(count * 7919)
-    shadows = []
+def _star_shadows(count: int, color: str, seed: int) -> str:
+    rng = random.Random(seed)
+    points = []
     for _ in range(count):
-        x = round(random.uniform(0, 100), 2)
-        y = round(random.uniform(0, 100), 2)
-        o = round(random.uniform(opacity_min, opacity_max), 2)
-        shadows.append(f"{x}vw {y}vh rgba(255,255,255,{o})")
-    return ", ".join(shadows)
+        x = rng.uniform(0, 100)
+        y = rng.uniform(0, 100)
+        points.append(f"{x:.2f}vw {y:.2f}vh 0 0 {color}")
+    return ", ".join(points)
 
 
-def _make_floaters():
-    """عناصر عائمة (رواد فضاء + كواكب) بتعدي الشاشة من اليمين للشمال وبترجع
-    تاني من الأول (loop لا نهائي حقيقي)، مع فروقات في التوقيت عشان الحركة
-    تفضل مستمرة على الشاشة من غير ما تختفي فترات طويلة."""
-    random.seed(4242)
-    colors = ["#7c5cff", "#38bdf8", "#f472b6", "#fb923c", "#34d399"]
-    floaters = []
+_STARS_DIM = _star_shadows(260, "rgba(255,255,255,0.30)", seed=4)
+_STARS_TINY = _star_shadows(420, "rgba(255,255,255,0.55)", seed=1)
+_STARS_SMALL = _star_shadows(220, "rgba(255,255,255,0.85)", seed=2)
+_STARS_BIG = _star_shadows(90, "rgba(201,191,255,0.95)", seed=3)
 
-    # رواد فضاء
-    n_astro = 5
-    for i in range(n_astro):
-        floaters.append({
-            "type": "astro",
-            "top": round(random.uniform(6, 90), 1),
-            "size": random.randint(24, 36),
-            "duration": round(random.uniform(16, 26), 1),
-            "delay": round(-(i / n_astro) * 22, 1),
-        })
+_STAR_TILE_HTML = f"""
+    <div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_DIM}"></div>
+    <div class="star-layer tw-a" style="width:1px;height:1px;box-shadow:{_STARS_TINY}"></div>
+    <div class="star-layer tw-b" style="width:2px;height:2px;box-shadow:{_STARS_SMALL}"></div>
+    <div class="star-layer tw-c" style="width:3px;height:3px;box-shadow:{_STARS_BIG}"></div>
+"""
 
-    # كواكب
-    n_planet = 7
-    for i in range(n_planet):
-        floaters.append({
-            "type": "planet",
-            "top": round(random.uniform(4, 94), 1),
-            "size": random.randint(16, 36),
-            "duration": round(random.uniform(18, 32), 1),
-            "delay": round(-(i / n_planet) * 26, 1),
-            "color": colors[i % len(colors)],
-        })
+_SPACE_BACKGROUND_HTML = f"""
+<div class="space-bg">
+    <div class="star-track">
+        <div class="star-tile">{_STAR_TILE_HTML}</div>
+        <div class="star-tile">{_STAR_TILE_HTML}</div>
+    </div>
 
-    return floaters
+    <div class="astronaut">
+        <svg width="34" height="34" viewBox="0 0 34 34">
+            <ellipse cx="17" cy="20" rx="8" ry="10" fill="#e5e7eb"/>
+            <circle cx="17" cy="10" r="8" fill="#f5f5f7"/>
+            <circle cx="17" cy="10" r="5.5" fill="#7c5cff" opacity="0.55"/>
+            <rect x="4" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
+            <rect x="24" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
+        </svg>
+    </div>
 
-
-if "star_shadows" not in st.session_state:
-    st.session_state.star_shadows = {
-        "small": _make_star_shadows(160, 0.15, 0.45),
-        "medium": _make_star_shadows(70, 0.35, 0.7),
-        "large": _make_star_shadows(28, 0.6, 0.95),
-    }
-
-if "floaters" not in st.session_state:
-    st.session_state.floaters = _make_floaters()
-
-_stars = st.session_state.star_shadows
-_floaters = st.session_state.floaters
-
-
-def _astro_svg(size):
-    return f"""<svg width="{size}" height="{size}" viewBox="0 0 34 34" style="animation: tumble 9s ease-in-out infinite;">
-        <ellipse cx="17" cy="20" rx="8" ry="10" fill="#e5e7eb"/>
-        <circle cx="17" cy="10" r="8" fill="#f5f5f7"/>
-        <circle cx="17" cy="10" r="5.5" fill="#7c5cff" opacity="0.55"/>
-        <rect x="4" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
-        <rect x="24" y="17" width="6" height="3" rx="1.5" fill="#cbd5e1"/>
-    </svg>"""
-
-
-_floaters_html = ""
-for f in _floaters:
-    if f["type"] == "astro":
-        _floaters_html += (
-            f'<div class="floater" style="top:{f["top"]}%; right:-8vw; '
-            f'width:{f["size"]}px; height:{f["size"]}px; '
-            f'animation-duration:{f["duration"]}s; animation-delay:{f["delay"]}s;">'
-            f'{_astro_svg(f["size"])}</div>'
-        )
-    else:
-        s = f["size"]
-        shadow = f"inset -{round(s*0.25,1)}px -{round(s*0.2,1)}px 0 rgba(0,0,0,0.25), 0 0 {round(s*0.4,1)}px rgba(255,255,255,0.15)"
-        _floaters_html += (
-            f'<div class="floater planet" style="top:{f["top"]}%; right:-8vw; '
-            f'width:{s}px; height:{s}px; background:{f["color"]}; box-shadow:{shadow}; '
-            f'animation-duration:{f["duration"]}s; animation-delay:{f["delay"]}s;"></div>'
-        )
+    <div class="planet planet-1"></div>
+    <div class="planet planet-2"></div>
+    <div class="planet planet-3"></div>
+</div>
+"""
 
 # ----------------------------------------------------------------------------
-# التنسيق (CSS) — خلفية فضائية + عناصر شفافة بالكامل بدون صناديق
+# CSS — الثيم الفضائي الكامل (خلفية، نجوم متحركة، زجاج شفاف للعناصر)
 # ----------------------------------------------------------------------------
 st.markdown(
-    f"""
+    """
     <style>
-    header[data-testid="stHeader"] {{ display: none !important; }}
-    #MainMenu {{ visibility: hidden !important; }}
-    footer {{ visibility: hidden !important; }}
+    header[data-testid="stHeader"] { display: none !important; background: transparent !important; }
+    #MainMenu { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
 
-    :root {{
-        --bg: #05060a;
-        --text-primary: #ffffff;
-        --text-secondary: #d7dae0;
-        --glass-bg: rgba(255,255,255,0.045);
-        --glass-border: rgba(255,255,255,0.16);
-        --glass-border-hover: rgba(255,255,255,0.32);
-    }}
+    .stApp {
+        background: #05060a !important;
+        overflow-x: hidden;
+    }
 
-    .stApp {{ background: var(--bg) !important; }}
-    .block-container {{
-        max-width: 640px;
+    .block-container {
+        max-width: 720px;
         margin: 0 auto;
-        padding: 2.5rem 1.2rem !important;
+        padding-top: 2.5rem !important;
         position: relative;
-        z-index: 2;
-    }}
+        z-index: 1;
+    }
 
-    * {{ color: var(--text-primary); }}
+    h1, h2, h3, p, label, span, div { color: #ffffff; }
 
-    /* خلفية النجوم الثابتة */
-    .space-bg {{
+    /* ---------------- الخلفية الفضائية ---------------- */
+    .space-bg {
         position: fixed;
         inset: 0;
         z-index: 0;
-        background: var(--bg);
         overflow: hidden;
         pointer-events: none;
-    }}
-    .stars-layer {{
+    }
+
+    .star-track {
         position: absolute;
         top: 0; left: 0;
-        width: 2px; height: 2px;
-        border-radius: 50%;
+        width: 200vw;
+        height: 100vh;
+        display: flex;
+        animation: starDrift 40s linear infinite;
+    }
+    .star-tile {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        flex: 0 0 100vw;
+    }
+    .star-layer {
+        position: absolute;
+        top: 0; left: 0;
         background: transparent;
-    }}
-    .stars-small {{ box-shadow: {_stars["small"]}; animation: twinkle 3s ease-in-out infinite alternate; }}
-    .stars-medium {{ box-shadow: {_stars["medium"]}; animation: twinkle 4s ease-in-out infinite alternate-reverse; }}
-    .stars-large {{ box-shadow: {_stars["large"]}; animation: twinkle 2.4s ease-in-out infinite alternate; }}
+        border-radius: 50%;
+    }
+    @keyframes starDrift {
+        from { transform: translateX(0); }
+        to   { transform: translateX(-100vw); }
+    }
 
-    @keyframes twinkle {{
-        from {{ opacity: 0.55; }}
-        to {{ opacity: 1; }}
-    }}
+    .tw-a { animation: twinkleA 3s ease-in-out infinite alternate; }
+    .tw-b { animation: twinkleB 4s ease-in-out infinite alternate; }
+    .tw-c {
+        animation: twinkleC 2.5s ease-in-out infinite alternate;
+        filter: drop-shadow(0 0 3px rgba(201,191,255,0.6));
+    }
+    @keyframes twinkleA { from { opacity: .25; } to { opacity: .7; } }
+    @keyframes twinkleB { from { opacity: .4; }  to { opacity: .9; } }
+    @keyframes twinkleC { from { opacity: .55; } to { opacity: 1; } }
 
-    /* عناصر عائمة بتعدي الشاشة من اليمين للشمال وبتلف تاني بشكل متصل بلا نهاية */
-    .floater {{
-        position: fixed;
-        z-index: 1;
-        pointer-events: none;
-        animation-name: floatX;
-        animation-timing-function: linear;
-        animation-iteration-count: infinite;
-    }}
-    @keyframes floatX {{
-        from {{ transform: translateX(0); }}
-        to {{ transform: translateX(-135vw); }}
-    }}
-    .planet {{ border-radius: 50%; opacity: 0.85; }}
-    @keyframes tumble {{
-        from {{ transform: rotate(-8deg); }}
-        to {{ transform: rotate(8deg); }}
-    }}
+    /* رائد الفضاء: بيظهر ويعبر الشاشة من اليمين للشمال كل ~17 ثانية */
+    .astronaut {
+        position: absolute;
+        top: 18%;
+        animation: crossFar 17s linear infinite;
+    }
+    .astronaut svg { animation: tumble 6s ease-in-out infinite alternate; }
+    @keyframes tumble { from { transform: rotate(-8deg); } to { transform: rotate(8deg); } }
 
-    /* الهيدر */
-    .app-header {{ text-align: center; margin-bottom: 1.8rem; }}
-    .app-header h1 {{
-        font-size: 1.9rem;
+    /* الكواكب: كل واحد بمدة وتأخير مختلف عشان ظهورهم يبان عشوائي */
+    .planet { position: absolute; border-radius: 50%; }
+    .planet-1 {
+        top: 12%; width: 26px; height: 26px; background: #7c5cff;
+        box-shadow: inset -6px -5px 0 rgba(0,0,0,.25), 0 0 10px rgba(255,255,255,.15);
+        animation: crossFar 19s linear infinite;
+        animation-delay: -4s;
+    }
+    .planet-2 {
+        top: 55%; width: 18px; height: 18px; background: #38bdf8;
+        box-shadow: inset -4px -3px 0 rgba(0,0,0,.25);
+        animation: crossFar 22s linear infinite;
+        animation-delay: -11s;
+    }
+    .planet-3 {
+        top: 75%; width: 34px; height: 34px; background: #f472b6;
+        box-shadow: inset -8px -6px 0 rgba(0,0,0,.25), 0 0 12px rgba(255,255,255,.12);
+        animation: crossFar 20s linear infinite;
+        animation-delay: -6s;
+    }
+
+    /* الظهور مش دايم: العنصر بيفضل مخفي/برّه الشاشة أغلب دورة الحركة، وبيعبر
+       الشاشة بس في جزء بسيط منها — فيبان بشكل متقطع كل ~15-20 ثانية */
+    @keyframes crossFar {
+        0%   { left: 110%; opacity: 0; }
+        55%  { left: 110%; opacity: 0; }
+        60%  { opacity: 1; }
+        92%  { left: -15%; opacity: 1; }
+        100% { left: -15%; opacity: 0; }
+    }
+
+    /* ---------------- شعار 322 ---------------- */
+    .app-header { text-align: center; margin-bottom: 2rem; }
+    .app-logo {
+        font-size: 44px;
         font-weight: 800;
-        letter-spacing: 1px;
-        margin-bottom: 0.3rem;
-        color: #fff;
-        text-shadow: 0 0 10px rgba(255,255,255,0.55), 0 0 22px rgba(255,255,255,0.3), 0 0 38px rgba(255,255,255,0.15);
+        letter-spacing: 2px;
+        color: #ffffff;
+        text-shadow:
+            0 0 10px rgba(255,255,255,0.55),
+            0 0 22px rgba(255,255,255,0.30),
+            0 0 38px rgba(255,255,255,0.15);
         animation: logoGlow 2.2s ease-in-out infinite alternate;
-    }}
-    .app-header p {{
-        color: var(--text-secondary) !important;
-        font-size: 0.92rem;
+    }
+    @keyframes logoGlow {
+        from {
+            text-shadow:
+                0 0 8px rgba(255,255,255,0.40),
+                0 0 16px rgba(255,255,255,0.22),
+                0 0 28px rgba(255,255,255,0.10);
+        }
+        to {
+            text-shadow:
+                0 0 13px rgba(255,255,255,0.70),
+                0 0 26px rgba(255,255,255,0.40),
+                0 0 44px rgba(255,255,255,0.20);
+        }
+    }
+    .app-header p {
+        color: #e5e7eb !important;
+        font-size: 0.95rem;
         text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-    }}
-    @keyframes logoGlow {{
-        from {{ text-shadow: 0 0 8px rgba(255,255,255,0.4), 0 0 16px rgba(255,255,255,0.22), 0 0 28px rgba(255,255,255,0.1); }}
-        to {{ text-shadow: 0 0 13px rgba(255,255,255,0.7), 0 0 26px rgba(255,255,255,0.4), 0 0 44px rgba(255,255,255,0.2); }}
-    }}
-    .app-badge {{
-        display: inline-block;
-        background: var(--glass-bg);
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-        border: 1px solid var(--glass-border);
-        color: #fff !important;
-        padding: 4px 14px;
-        border-radius: 999px;
-        font-size: 0.72rem;
-        font-weight: 700;
-        margin-bottom: 0.8rem;
-        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-    }}
+        margin-top: 0.3rem;
+    }
 
-    /* الفورم شفاف بدون أي صندوق حوله */
-    div[data-testid="stForm"] {{
+    /* ---------------- عناصر زجاجية شفافة (Glassmorphism) ---------------- */
+    div[data-testid="stForm"] {
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
         padding: 0 !important;
-    }}
+    }
 
-    /* صندوق كتابة الوصف — شفاف بالكامل */
-    div[data-testid="stTextArea"] textarea {{
-        background: var(--glass-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 16px !important;
-        color: #fff !important;
-        direction: auto !important;
-        unicode-bidi: plaintext !important;
-        text-align: start !important;
+    div[data-testid="stTextArea"] textarea {
+        background: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
-        box-shadow: none !important;
-    }}
-    div[data-testid="stTextArea"] textarea:focus {{
-        border-color: var(--glass-border-hover) !important;
-        box-shadow: 0 0 0 1px var(--glass-border-hover) !important;
-    }}
-    div[data-testid="stTextArea"] textarea::placeholder {{
-        color: rgba(255,255,255,0.45) !important;
-    }}
-    div[data-testid="stTextArea"] label p {{ color: #fff !important; }}
-
-    /* صندوق اختيار المدة — شفاف وصغير */
-    div[data-testid="stSelectbox"] > label p {{ color: #fff !important; }}
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
-        background: var(--glass-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-radius: 999px !important;
-        color: #fff !important;
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-    }}
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div:hover {{
-        border-color: var(--glass-border-hover) !important;
-    }}
-    div[data-testid="stSelectbox"] svg {{ fill: #fff !important; }}
-    ul[data-testid="stVirtualDropdown"], div[data-baseweb="popover"] ul {{
-        background: #0d0e14 !important;
-        border: 1px solid var(--glass-border) !important;
-    }}
-    ul[data-testid="stVirtualDropdown"] li, div[data-baseweb="popover"] li {{
-        color: #fff !important;
-    }}
-
-    /* زرار إنشاء الفيديو — شفاف زي الباقي */
-    .stButton button, div[data-testid="stForm"] button[kind="primary"] {{
-        background: var(--glass-bg) !important;
-        backdrop-filter: blur(6px);
-        -webkit-backdrop-filter: blur(6px);
-        color: #fff !important;
-        border-radius: 999px !important;
-        font-weight: 700 !important;
-        padding: 0.65rem 1.4rem !important;
-        border: 1px solid var(--glass-border) !important;
-        width: 100%;
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-radius: 22px !important;
+        color: #ffffff !important;
         text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-        box-shadow: none !important;
-    }}
-    .stButton button:hover, div[data-testid="stForm"] button[kind="primary"]:hover {{
-        border-color: var(--glass-border-hover) !important;
-    }}
+    }
+    div[data-testid="stTextArea"] textarea::placeholder {
+        color: rgba(255,255,255,0.55) !important;
+    }
 
-    .stDownloadButton button {{
-        background: var(--glass-bg) !important;
-        color: #fff !important;
-        border-radius: 999px !important;
-        font-weight: 700 !important;
-        border: 1px solid var(--glass-border) !important;
-        width: 100%;
+    div[data-baseweb="select"] > div {
+        background: rgba(255,255,255,0.04) !important;
         backdrop-filter: blur(6px);
         -webkit-backdrop-filter: blur(6px);
-    }}
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-radius: 14px !important;
+    }
+    div[data-baseweb="select"] * { color: #ffffff !important; }
 
-    /* رسائل النجاح/الخطأ/التحذير */
-    div[data-testid="stAlert"] {{
-        background: var(--glass-bg) !important;
-        border: 1px solid var(--glass-border) !important;
-        color: #fff !important;
-    }}
-    div[data-testid="stAlert"] p {{ color: #fff !important; }}
+    .stButton button,
+    div[data-testid="stForm"] button {
+        background: rgba(255,255,255,0.04) !important;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-radius: 999px !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        width: 100%;
+    }
 
-    /* استجابة للموبايل */
-    @media (max-width: 640px) {{
-        .block-container {{ padding: 1.6rem 0.9rem !important; }}
-        .app-header h1 {{ font-size: 1.5rem; }}
-        .floater {{ transform: scale(0.85); }}
-    }}
+    .stDownloadButton button {
+        background: rgba(255,255,255,0.04) !important;
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+        border: 1px solid rgba(255,255,255,0.14) !important;
+        border-radius: 999px !important;
+        color: #ffffff !important;
+        font-weight: 700 !important;
+        width: 100%;
+    }
+
+    div[data-testid="stExpander"] {
+        background: rgba(255,255,255,0.03) !important;
+        border: 1px solid rgba(255,255,255,0.1) !important;
+        border-radius: 16px !important;
+    }
     </style>
-
-    <div class="space-bg">
-        <div class="stars-layer stars-small"></div>
-        <div class="stars-layer stars-medium"></div>
-        <div class="stars-layer stars-large"></div>
-    </div>
-
-    {_floaters_html}
     """,
     unsafe_allow_html=True,
 )
 
 # ----------------------------------------------------------------------------
-# رأس الصفحة
+# الخلفية الفضائية + الشعار
 # ----------------------------------------------------------------------------
+st.markdown(_SPACE_BACKGROUND_HTML, unsafe_allow_html=True)
+
 st.markdown(
     """
     <div class="app-header">
-        <span class="app-badge">مدعوم بنموذج LTX-2.3</span>
-        <h1>🎬 مولّد فيديو بالذكاء الاصطناعي</h1>
-        <p>اكتب وصف الفيديو اللي في خيالك، وهيتولّد لك فيديو قصير بالصوت مباشرة</p>
+        <div class="app-logo">322</div>
+        <p>اكتب وصف الفيديو اللي في خيالك</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -389,8 +325,8 @@ def get_client():
 
 
 def _find_video_path(result):
-    """بيدور جوه رد الـ API (اللي ممكن يكون tuple/list/dict) عن أول مسار فيديو
-    حقيقي موجود على القرص (gradio_client بينزّل الملفات محليًا تلقائيًا)."""
+    """بيدور جوه رد الـ API عن أول مسار فيديو حقيقي موجود على القرص
+    (gradio_client بينزّل الملفات محليًا تلقائيًا)."""
 
     def is_valid_path(x):
         return isinstance(x, str) and os.path.exists(x)
@@ -420,12 +356,12 @@ def generate_video(prompt: str, duration: int, enhance_prompt: bool, high_resolu
     height, width = (1536, 2048) if high_resolution else (1024, 1536)
     try:
         result = client.predict(
-            input_image=None,          # الصورة الاختيارية لتوجيه الحركة — مش مستخدمة هنا
-            prompt=prompt,              # وصف الفيديو (Prompt)
-            duration=float(duration),   # المدة بالثواني (رقم عشري بين 1.0 و 10.0)
-            enhance_prompt=enhance_prompt,  # تحسين الوصف تلقائيًا
+            input_image=None,              # الصورة الاختيارية لتوجيه الحركة — مش مستخدمة هنا
+            prompt=prompt,                  # وصف الفيديو (Prompt)
+            duration=float(duration),       # المدة بالثواني (رقم عشري بين 1.0 و 10.0)
+            enhance_prompt=enhance_prompt,   # تحسين الوصف تلقائيًا
             seed=10,
-            randomize_seed=True,         # نسيب Seed عشوائي كل مرة عشان نتايج متنوعة
+            randomize_seed=True,             # نسيب Seed عشوائي كل مرة عشان نتايج متنوعة
             height=height,
             width=width,
             api_name="/generate_video",
@@ -452,21 +388,28 @@ def generate_video(prompt: str, duration: int, enhance_prompt: bool, high_resolu
 
 
 # ----------------------------------------------------------------------------
-# واجهة الإدخال — 3 عناصر بس: صندوق الوصف، صندوق المدة، زرار الإنشاء
+# واجهة الإدخال
 # ----------------------------------------------------------------------------
 with st.form("video_form"):
     prompt = st.text_area(
-        "وصف الفيديو (Prompt)",
+        "وصف الفيديو",
         placeholder="مثال: رائد فضاء يمشي ببطء على سطح القمر، غبار ناعم يتطاير حول قدميه، إضاءة سينمائية...",
         height=130,
+        label_visibility="collapsed",
     )
 
-    duration = st.selectbox(
-        "مدة الفيديو",
-        options=list(range(MIN_DURATION, MAX_DURATION + 1)),
-        index=DEFAULT_DURATION - MIN_DURATION,
-        format_func=lambda d: f"{d} ثواني",
-    )
+    col_duration, _ = st.columns([1, 2])
+    with col_duration:
+        duration = st.selectbox(
+            "المدة",
+            options=list(range(MIN_DURATION, MAX_DURATION + 1)),
+            index=DEFAULT_DURATION - MIN_DURATION,
+            format_func=lambda n: f"{n} ثواني",
+        )
+
+    with st.expander("⚙️ إعدادات متقدمة"):
+        enhance_prompt = st.checkbox("تحسين الوصف تلقائيًا (Enhance Prompt)", value=True)
+        high_resolution = st.checkbox("دقة عالية (أبطأ في التوليد)", value=False)
 
     submitted = st.form_submit_button("إنشاء الفيديو")
 
@@ -477,15 +420,15 @@ if submitted:
     if not prompt.strip():
         st.warning("من فضلك، اكتب وصف الفيديو الأول.")
     else:
-        with st.spinner("جاري توليد الفيديو والصوت... ممكن تاخد شوية وقت حسب المدة المطلوبة ⏳"):
+        with st.spinner("جاري توليد الفيديو والصوت... ممكن تاخد شوية وقت حسب المدة المطلوبة"):
             try:
                 video_path = generate_video(
                     prompt=prompt.strip(),
                     duration=duration,
-                    enhance_prompt=ENHANCE_PROMPT_DEFAULT,
-                    high_resolution=HIGH_RESOLUTION_DEFAULT,
+                    enhance_prompt=enhance_prompt,
+                    high_resolution=high_resolution,
                 )
-                st.success("تم إنتاج الفيديو بنجاح! 🎉")
+                st.success("تم إنتاج الفيديو بنجاح!")
                 st.video(video_path)
                 with open(video_path, "rb") as f:
                     st.download_button(
