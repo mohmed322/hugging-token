@@ -334,6 +334,33 @@ def _ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 
+def _base_ydl_opts() -> dict:
+    """
+    إعدادات مشتركة بتقلل احتمال ظهور خطأ HTTP 403 Forbidden من يوتيوب —
+    المشكلة دي بتحصل غالبًا لأن يوتيوب بيرفض بعض الطلبات اللي جايه من
+    نوع "عميل الويب" الافتراضي، فبنخلي yt-dlp يجرب يتصرف كأنه تطبيق
+    الموبايل (Android) الأول، وبعدين ios، وبعدين الويب العادي كحل احتياطي.
+    """
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"],
+            }
+        },
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+            )
+        },
+    }
+
+
 def get_video_info(url: str):
     """بيجيب معلومات الفيديو (المدة أساسًا) من غير ما ينزّل أي حاجة خالص."""
     if yt_dlp is None:
@@ -341,9 +368,7 @@ def get_video_info(url: str):
             "مكتبة yt-dlp مش متثبتة. ضيفها في requirements.txt: yt-dlp"
         )
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
+        **_base_ydl_opts(),
         "skip_download": True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -365,11 +390,9 @@ def download_audio_sample(url: str, workdir: str) -> str:
         )
     out_template = os.path.join(workdir, "audio_sample.%(ext)s")
     ydl_opts = {
+        **_base_ydl_opts(),
         "format": "bestaudio/best",
         "outtmpl": out_template,
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
@@ -393,12 +416,10 @@ def download_youtube_clip(url: str, start_seconds: float, end_seconds: float, wo
 
     out_template = os.path.join(workdir, "clip.%(ext)s")
     ydl_opts = {
+        **_base_ydl_opts(),
         "format": "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4]/best",
         "outtmpl": out_template,
         "merge_output_format": "mp4",
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
         "download_ranges": download_range_func(None, [(start_seconds, end_seconds)]),
         "force_keyframes_at_cuts": True,
     }
